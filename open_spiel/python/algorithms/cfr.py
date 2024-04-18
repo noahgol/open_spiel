@@ -86,8 +86,10 @@ def _update_current_policy(current_policy, info_state_nodes):
       state_policy[action] = value
 
 
-def _update_average_policy(average_policy, info_state_nodes):
+def _update_average_policy(average_policy, info_state_nodes, iterations_ran = None):
   """Updates in place `average_policy` to the average of all policies iterated.
+  If iterations_ran is given, then average_policy is calulated as 
+  cumulative_policy / iterations_ran, otherwise, it will be normalized.
 
   This function is a module level function to be reused by both CFRSolver and
   CFRBRSolver.
@@ -95,18 +97,19 @@ def _update_average_policy(average_policy, info_state_nodes):
   Args:
     average_policy: A `policy.TabularPolicy` to be updated in-place.
     info_state_nodes: A dictionary {`info_state_str` -> `_InfoStateNode`}.
+    iterations: Number of iterations ran.
   """
   for info_state, info_state_node in info_state_nodes.items():
     info_state_policies_sum = info_state_node.cumulative_policy
     state_policy = average_policy.policy_for_key(info_state)
-    probabilities_sum = sum(info_state_policies_sum.values())
-    if probabilities_sum == 0:
+    divider = iterations_ran if iterations_ran is not None else sum(info_state_policies_sum.values())
+    if divider == 0:
       num_actions = len(info_state_node.legal_actions)
       for action in info_state_node.legal_actions:
         state_policy[action] = 1 / num_actions
     else:
       for action, action_prob_sum in info_state_policies_sum.items():
-        state_policy[action] = action_prob_sum / probabilities_sum
+        state_policy[action] = action_prob_sum / divider
 
 def _compute_average_policy(policy_list, game):
     if not policy_list:
@@ -238,6 +241,10 @@ class _CFRSolverBase(object):
     converges with high probability for CFR-BR.
     """
     return self._current_policy
+
+  def average_policy_by_iterations(self, iterations):
+    _update_average_policy(self._average_policy, self._info_state_nodes, iterations)
+    return self._average_policy
 
   def average_policy(self):
     """Returns the average of all policies iterated.
