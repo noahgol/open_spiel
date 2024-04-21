@@ -131,6 +131,15 @@ class BestResponsePolicy(openspiel_policy.Policy):
         for state, p_state in self.decision_nodes(
             openspiel_policy.child(parent_state, action)):
           yield (state, p_state * p_action)
+        # compute sum_{t} p_state(t-th policy) * p_action(t-th policy)
+        # for action in num_actions:
+        #    sum = 0
+        #    for t in range(T):
+        #    p_action = self.transitions(state)[t][action]
+        #       for state, p_state in self.decision_nodes(
+        #           openspiel_policy.child(parent_state, action)):
+        #           sum += p_state * p_action
+        #     return sum
 
   def joint_action_probabilities_counterfactual(self, state):
     """Get list of action, probability tuples for simultaneous node.
@@ -165,6 +174,8 @@ class BestResponsePolicy(openspiel_policy.Policy):
     elif state.is_simultaneous_node():
       return self.joint_action_probabilities_counterfactual(state)
     else:
+      # average over policy history
+      # return list(policy.action_probabilities(state).items() for policy in self._policy_history)
       return list(self._policy.action_probabilities(state).items())
 
   @_memoize_method(key_fn=lambda state: state.history_str())
