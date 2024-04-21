@@ -189,6 +189,12 @@ class BestResponsePolicy(openspiel_policy.Policy):
           state.information_state_string(self._player_id))
       return self.q_value(state, action)
     else:
+      # Incorrect
+      # l = self.transitions(state)
+      # do below line but average over l[t] for t = 1..T
+      # Correct (I think...)
+      # weighted average where you weight by probability of reaching state under policy t (returned by self.decision_nodes?)
+      # need re-implementation of self.decision_nodes for each policy t = 1..T
       return sum(p * self.q_value(state, a)
                  for a, p in self.transitions(state)
                  if p > self._cut_threshold)
