@@ -164,6 +164,7 @@ class _CFRSolverBase(object):
     # This is for returning the current policy and average policy to a caller
     self._current_policy = policy.TabularPolicy(game)
     self._average_policy = self._current_policy.__copy__()
+    self._policy_history = []
 
     self._info_state_nodes = {}
     self._initialize_info_state_nodes(self._root_node)
@@ -235,6 +236,10 @@ class _CFRSolverBase(object):
     """
     _update_average_policy(self._average_policy, self._info_state_nodes)
     return self._average_policy
+  
+  def policy_history(self):
+    """Returns the list of policy history."""
+    return self._policy_history
 
   def _compute_counterfactual_regret_for_player(self, state, policies,
                                                 reach_probabilities, player):
@@ -437,6 +442,8 @@ class _CFRSolver(_CFRSolverBase):
       if self._regret_matching_plus:
         _apply_regret_matching_plus_reset(self._info_state_nodes)
       _update_current_policy(self._current_policy, self._info_state_nodes)
+
+    self._policy_history.append(self._current_policy.__copy__())
 
 
 class CFRPlusSolver(_CFRSolver):

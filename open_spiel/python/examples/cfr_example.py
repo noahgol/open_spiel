@@ -24,22 +24,30 @@ import pyspiel
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("iterations", 10, "Number of iterations")
-flags.DEFINE_string("game", "pig", "Name of the game")
-flags.DEFINE_integer("players", 3, "Number of players")
+flags.DEFINE_string("game", "kuhn_poker", "Name of the game")
+flags.DEFINE_integer("players", 2, "Number of players")
 flags.DEFINE_integer("horizon", 5, "horizon")
 flags.DEFINE_integer("print_freq", 1, "How often to print the exploitability")
 
 
 def main(_):
-  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+#  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players})
   cfr_solver = cfr.CFRSolver(game)
 
   for i in range(FLAGS.iterations):
     cfr_solver.evaluate_and_update_policy()
     if i % FLAGS.print_freq == 0:
-      conv = exploitability.exploitability(game, cfr_solver.average_policy())
+      conv = exploitability.nash_conv_v2(game, cfr_solver.policy_history())
       print("Iteration {} exploitability {}".format(i, conv))
-
+  # Instead of storing the entire history of policies, we can also simply calculate the nash_conv
+  # using only the most recent history (current_history) after each iteration.
+  #conv_sum = 0
+  #for i in range(FLAGS.iterations):
+  #  cfr_solver.evaluate_and_update_policy()
+  #  conv_sum += exploitability.nash_conv(game, cfr_solver.current_policy())
+  #  if i % FLAGS.print_freq == 0:
+  #    print("Iteration {} exploitability {}".format(i, conv_sum/(i+1)))
 
 if __name__ == "__main__":
   app.run(main)
