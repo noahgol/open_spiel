@@ -24,14 +24,15 @@ import pyspiel
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("iterations", 10, "Number of iterations")
-flags.DEFINE_string("game", "pig", "Name of the game")
-flags.DEFINE_integer("players", 3, "Number of players")
+flags.DEFINE_string("game", "kuhn_poker", "Name of the game")
+flags.DEFINE_integer("players", 2, "Number of players")
 flags.DEFINE_integer("horizon", 5, "horizon")
 flags.DEFINE_integer("print_freq", 1, "How often to print the exploitability")
 
 
 def main(_):
-  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+#  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players})
   cfr_solver = cfr.CFRSolver(game)
 
   for i in range(FLAGS.iterations):
