@@ -114,8 +114,8 @@ class BestResponsePolicy(openspiel_policy.Policy):
     self._root_state = root_state
     self.infosets = self.info_sets(root_state)
     if self._policy_history:
-      self._history_infosets = {
-        policy : self.info_sets(root_state, policy) for policy in self._policy_history}
+      self._history_infosets = [
+        self.info_sets(root_state, policy) for policy in self._policy_history]
 
     self._cut_threshold = cut_threshold
 
@@ -123,7 +123,6 @@ class BestResponsePolicy(openspiel_policy.Policy):
     """Returns a dict of infostatekey to list of (state, cf_probability)."""
     if not policy: policy = self._policy
     infosets = collections.defaultdict(list)
-    infosets[state.information_state_string(self._player_id)].append((state, 1))
     for s, p in self.decision_nodes(state, policy):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
@@ -215,10 +214,10 @@ class BestResponsePolicy(openspiel_policy.Policy):
         infostate_str = state.information_state_string(self._player_id)
         prob_sum = 0
         value_sum = 0
-        for p in self._policy_history:
-          infoset = self._history_infosets[p].get(infostate_str, None)
+        for t in range(len(self._policy_history)):
+          infoset = self._history_infosets[t].get(infostate_str)
           reaching_prob = sum(cf_p for s, cf_p in infoset) if infoset else 1
-          value = sum(p * self.q_value(state, a) for a, p in self.transitions(state, p))
+          value = sum(p * self.q_value(state, a) for a, p in self.transitions(state, self._policy_history[t]))
           value_sum += reaching_prob * value
           prob_sum += reaching_prob
         # return weighted value
@@ -245,12 +244,24 @@ class BestResponsePolicy(openspiel_policy.Policy):
   @_memoize_method()
   def best_response_action(self, infostate):
     """Returns the best response for this information state."""
-    infoset = self.infosets[infostate]
-    # Get actions from the first (state, cf_prob) pair in the infoset list.
-    # Return the best action by counterfactual-reach-weighted state-value.
-    return max(
-        infoset[0][0].legal_actions(self._player_id),
-        key=lambda a: sum(cf_p * self.q_value(s, a) for s, cf_p in infoset))
+    if self._policy_history:
+      legal_actions = self._history_infosets[0][infostate][0][0].legal_actions(self._player_id)
+      infoset_history = [infosets[infostate] for infosets in self._history_infosets]
+      def best_response_action_aux(a):
+        values = [sum(cf_p * self.q_value(s, a) for s, cf_p in infoset)
+                                                for infoset in infoset_history]
+        reaching_probs = [sum(cf_p for s, cf_p in infoset)
+                                   for infoset in infoset_history]
+        return sum(v * p for v, p in zip(values, reaching_probs))/sum(reaching_probs)
+      # Returns the best action of the weighted state-value over policy history.
+      return max(legal_actions, key=best_response_action_aux)
+    else:
+      infoset = self.infosets[infostate]
+      # Get actions from the first (state, cf_prob) pair in the infoset list.
+      # Return the best action by counterfactual-reach-weighted state-value.
+      return max(
+          infoset[0][0].legal_actions(self._player_id),
+          key=lambda a: sum(cf_p * self.q_value(s, a) for s, cf_p in infoset))
 
   def action_probabilities(self, state, player_id=None):
     """Returns the policy for a player in a state.
