@@ -25,6 +25,7 @@ The average policy is what converges to a Nash Equilibrium.
 import collections
 import attr
 import numpy as np
+import pdb
 
 from open_spiel.python import policy
 import pyspiel
@@ -108,6 +109,29 @@ def _update_average_policy(average_policy, info_state_nodes):
       for action, action_prob_sum in info_state_policies_sum.items():
         state_policy[action] = action_prob_sum / probabilities_sum
 
+def _compute_average_policy(policy_list, game):
+    if not policy_list:
+        raise ValueError("The list of policies should not be empty.")
+
+    averaged_policy = policy.TabularPolicy(game)
+    # pdb.set_trace()
+
+    num_states = len(averaged_policy.states)
+    num_actions = game.num_distinct_actions()
+    averaged_policy.action_probability_array = np.zeros((num_states, num_actions))
+    # pdb.set_trace()
+
+    for pol in policy_list:
+        for index, state in enumerate(averaged_policy.states):
+            state_key = averaged_policy._state_key(state, state.current_player())
+            if state_key in pol.state_lookup:
+                added_probs = pol.policy_for_key(state_key)
+                averaged_policy.action_probability_array[index, :] += added_probs
+
+    T = len(policy_list)
+    averaged_policy.action_probability_array /= T
+
+    return averaged_policy
 
 class _CFRSolverBase(object):
   r"""A base class for both CFR and CFR-BR.
@@ -172,6 +196,7 @@ class _CFRSolverBase(object):
     self._linear_averaging = linear_averaging
     self._alternating_updates = alternating_updates
     self._regret_matching_plus = regret_matching_plus
+    self._policy_history = []  # Initialize an empty list to store policy histories.
 
   def _initialize_info_state_nodes(self, state):
     """Initializes info_state_nodes.
@@ -233,8 +258,11 @@ class _CFRSolverBase(object):
       time averaged policy (weighted by player reach probabilities) for both
       players.
     """
-    _update_average_policy(self._average_policy, self._info_state_nodes)
-    return self._average_policy
+    return _compute_average_policy(self._policy_history, self._game)
+
+  def policy_history(self):
+    """Returns the list of policies iterated."""
+    return self._policy_history
 
   def _compute_counterfactual_regret_for_player(self, state, policies,
                                                 reach_probabilities, player):
@@ -428,6 +456,7 @@ class _CFRSolver(_CFRSolverBase):
         if self._regret_matching_plus:
           _apply_regret_matching_plus_reset(self._info_state_nodes)
         _update_current_policy(self._current_policy, self._info_state_nodes)
+        self._policy_history.append(self._current_policy.__copy__(True))
     else:
       self._compute_counterfactual_regret_for_player(
           self._root_node,
@@ -437,7 +466,6 @@ class _CFRSolver(_CFRSolverBase):
       if self._regret_matching_plus:
         _apply_regret_matching_plus_reset(self._info_state_nodes)
       _update_current_policy(self._current_policy, self._info_state_nodes)
-
 
 class CFRPlusSolver(_CFRSolver):
   """CFR+ implementation.
