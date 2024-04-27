@@ -39,7 +39,8 @@ def main(_):
     cfr_solver.evaluate_and_update_policy()
     if i % FLAGS.print_freq == 0:
       conv = exploitability.exploitability(game, cfr_solver.average_policy())
-      print("Iteration {} exploitability {}".format(i, conv))
+      nash_conv = exploitability.nash_conv(game, cfr_solver.average_policy(), policy_history=cfr_solver.policy_history())
+      print("Iteration {} exploitability {} new nash_conv {}".format(i, conv, nash_conv))
 
 
 if __name__ == "__main__":

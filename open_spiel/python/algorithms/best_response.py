@@ -123,6 +123,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
     """Returns a dict of infostatekey to list of (state, cf_probability)."""
     if not policy: policy = self._policy
     infosets = collections.defaultdict(list)
+    infosets[state.information_state_string(self._player_id)].append((state, 1))
     for s, p in self.decision_nodes(state, policy):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
@@ -215,12 +216,12 @@ class BestResponsePolicy(openspiel_policy.Policy):
         prob_sum = 0
         value_sum = 0
         for p in self._policy_history:
-          infoset = self._history_infosets[p][infostate_str]
-          reaching_prob = sum(cf_p for s, cf_p in infoset)
+          infoset = self._history_infosets[p].get(infostate_str, None)
+          reaching_prob = sum(cf_p for s, cf_p in infoset) if infoset else 1
           value = sum(p * self.q_value(state, a) for a, p in self.transitions(state, p))
           value_sum += reaching_prob * value
           prob_sum += reaching_prob
-        # return weight value
+        # return weighted value
         return value_sum / prob_sum
 
   def q_value(self, state, action):
