@@ -24,23 +24,29 @@ import pyspiel
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer("iterations", 1000, "Number of iterations")
-flags.DEFINE_string("game", "kuhn_poker", "Name of the game")
-flags.DEFINE_integer("players", 2, "Number of players")
+flags.DEFINE_string("game", "goofspiel", "Name of the game")
+#flags.DEFINE_string("game", "kuhn_poker", "Name of the game")
+flags.DEFINE_integer("players", 3, "Number of players")
 flags.DEFINE_integer("horizon", 5, "horizon")
-flags.DEFINE_integer("print_freq", 100, "How often to print the exploitability")
+flags.DEFINE_integer("print_freq", 10, "How often to print the exploitability")
 
 
 def main(_):
-#  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
-  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players})
+#  game = pyspiel.load_game("pig", {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+#  game = pyspiel.load_game("kuhn_poker", {"players": FLAGS.players})
+  game = pyspiel.load_game_as_turn_based("goofspiel", 
+      {"players": 3, "imp_info": True, "num_cards": 4, "points_order": "descending"})
   cfr_solver = cfr.CFRSolver(game)
+  history_infosets = [[] for _ in range(FLAGS.players)]  # cache history infosets for better performance
 
   for i in range(FLAGS.iterations):
     cfr_solver.evaluate_and_update_policy()
-    if i % FLAGS.print_freq == 0:
+    if (i+1) % FLAGS.print_freq == 0:
       conv = exploitability.nash_conv(game, cfr_solver.average_policy())
-      nash_conv = exploitability.nash_conv(game, cfr_solver.average_policy(), policy_history=cfr_solver.policy_history())
-      print("Iteration {0:4d} exploitability {1:.15f} new nash_conv {2:.15f}".format(i, conv, nash_conv))
+      nash_conv = exploitability.nash_conv(game, cfr_solver.average_policy(),
+                                           policy_history=cfr_solver.policy_history(),
+                                           history_infosets=history_infosets)
+      print("Iteration {0:4d} exploitability {1:.15f} new nash_conv {2:.15f}".format(i+1, conv, nash_conv))
 
 
 if __name__ == "__main__":

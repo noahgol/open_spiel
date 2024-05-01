@@ -92,6 +92,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
                player_id,
                policy,
                policy_history=None,
+               history_infosets=[],
                root_state=None,
                cut_threshold=0.0):
     """Initializes the best-response calculation.
@@ -114,8 +115,10 @@ class BestResponsePolicy(openspiel_policy.Policy):
     self._root_state = root_state
     self.infosets = self.info_sets(root_state)
     if self._policy_history:
-      self._history_infosets = [
-        self.info_sets(root_state, policy) for policy in self._policy_history]
+      self._history_infosets = history_infosets[self._player_id]
+      # only calculate infosets for recent added policies
+      for t in range(len(self._history_infosets), len(self._policy_history)):
+        self._history_infosets.append(self.info_sets(root_state, self._policy_history[t]))
 
     self._cut_threshold = cut_threshold
 
@@ -245,8 +248,8 @@ class BestResponsePolicy(openspiel_policy.Policy):
   def best_response_action(self, infostate):
     """Returns the best response for this information state."""
     if self._policy_history:
-      legal_actions = self._history_infosets[0][infostate][0][0].legal_actions(self._player_id)
       infoset_history = [infosets[infostate] for infosets in self._history_infosets]
+      legal_actions = infoset_history[0][0][0].legal_actions(self._player_id)
       def best_response_action_aux(a):
         values = [sum(cf_p * self.q_value(s, a) for s, cf_p in infoset)
                                                 for infoset in infoset_history]
