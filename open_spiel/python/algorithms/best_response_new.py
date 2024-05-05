@@ -119,7 +119,8 @@ class BestResponsePolicy(openspiel_policy.Policy):
     for s, p in self.decision_nodes(state):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
-
+  
+  @_memoize_method(key_fn=lambda state: state.history_str())
   def decision_nodes(self, parent_state):
     """Yields a (state, cf_prob) pair for each descendant decision node."""
     if not parent_state.is_terminal():
