@@ -120,6 +120,29 @@ class BestResponsePolicy(openspiel_policy.Policy):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
   
+  # Not-as-easy way:
+  def decision_nodes_basic(self, parent_state):
+    # Return list of states *without* their reach probabilities (might be right)
+    if not parent_state.is_terminal():
+      if parent_state.current_player() == self._player_id:
+        yield parent_state
+      for action, _ in self.transitions(parent_state):
+        for state in self.decision_nodes_basic(parent_state.child(action)):
+          yield state
+
+  def decision_nodes_nonrec(self, root_state):
+    # Return list of states *with* their reach probabilities
+    # create dict of state to reach probability
+    # do similar thing to decision_nodes below but use decision_nodes_basic to get list of states
+    return
+  
+  ## Easier Way: ##
+  def decision_nodes_multpol(self, root_state):
+    # for each t in [T], call old decision_nodes() with policy_history[t]
+    # average reach probabilities for each state over t in [T].
+    # return list of (state, average_reach_prob) pairs
+    return
+  
   @_memoize_method(key_fn=lambda state: state.history_str())
   def decision_nodes(self, parent_state):
     """Yields a (state, cf_prob) pair for each descendant decision node."""
