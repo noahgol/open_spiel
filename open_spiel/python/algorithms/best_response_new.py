@@ -50,40 +50,6 @@ def _memoize_method(key_fn=lambda x: x):
 
   return memoizer
 
-
-def compute_states_and_info_states_if_none(game,
-                                           all_states=None,
-                                           state_to_information_state=None):
-  """Returns all_states and/or state_to_information_state for the game.
-
-  To recompute everything, pass in None for both all_states and
-  state_to_information_state. Otherwise, this function will use the passed in
-  values to reconstruct either of them.
-
-  Args:
-    game: The open_spiel game.
-    all_states: The result of calling get_all_states.get_all_states. Cached for
-      improved performance.
-    state_to_information_state: A dict mapping state.history_str() to
-      state.information_state for every state in the game. Cached for improved
-      performance.
-  """
-  if all_states is None:
-    all_states = get_all_states.get_all_states(
-        game,
-        depth_limit=-1,
-        include_terminals=False,
-        include_chance_states=False)
-
-  if state_to_information_state is None:
-    state_to_information_state = {
-        state: all_states[state].information_state_string()
-        for state in all_states
-    }
-
-  return all_states, state_to_information_state
-
-
 class BestResponsePolicy(openspiel_policy.Policy):
   """Computes the best response to a specified strategy."""
 
@@ -119,25 +85,50 @@ class BestResponsePolicy(openspiel_policy.Policy):
     for s, p in self.decision_nodes(state):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
-  
+
+  def transitions_per_policy(self, state, policy):
+    """Returns a list of (action, cf_prob) pairs from the specified state."""
+    if state.current_player() == self._player_id:
+      # Counterfactual reach probabilities exclude the best-responder's actions,
+      # hence return probability 1.0 for every action.
+      return [(action, 1.0) for action in state.legal_actions()]
+    elif state.is_chance_node():
+      return state.chance_outcomes()
+    elif state.is_simultaneous_node():
+      return self.joint_action_probabilities_counterfactual(state)
+    else:
+      return list(policy.action_probabilities(state).items())
+
+  def decision_nodes_per_policy(self, parent_state, policy):
+    """Yields a (state, cf_prob) pair for each descendant decision node."""
+    if not parent_state.is_terminal():
+      if (parent_state.current_player() == self._player_id or   
+          parent_state.is_simultaneous_node()):
+        yield (parent_state, 1.0)
+      for action, p_action in self.transitions_per_policy(parent_state, policy):
+        for state, p_state in self.decision_nodes_per_policy(
+            openspiel_policy.child(parent_state, action), policy):
+          yield (state, p_state * p_action)
+
   @_memoize_method(key_fn=lambda state: state.history_str())
   def decision_nodes(self, parent_state):
-    """Yields a (state, cf_prob) pair for each descendant decision node."""
+    # for each t in [T], call old decision_nodes() with policy_history[t]
+    # average reach probabilities for each state over t in [T].
+    # return list of (state, average_reach_prob) pairs
+
     if not parent_state.is_terminal():
       if (parent_state.current_player() == self._player_id or
           parent_state.is_simultaneous_node()):
         yield (parent_state, 1.0)
       T = len(self._policy_history)
-      transit = self.transitions(parent_state)
       prob_sum = {}
-      for t in range(T):
-        for action, p_action in transit[t]:
-          for state, p_state in self.decision_nodes(openspiel_policy.child(parent_state, action)):
-            hist = state.history_str()
-            if hist not in prob_sum:
-              prob_sum[hist] = [state, p_state * p_action]
-            else:
-              prob_sum[hist][1] += p_state * p_action
+      for policy in self._policy_history:
+        for state, p_state in self.decision_nodes_per_policy(parent_state, policy):
+          hist = state.history_str()
+          if hist not in prob_sum:
+            prob_sum[hist] = [state, p_state]
+          else:
+            prob_sum[hist][1] += p_state
       for hist in prob_sum:
         state, p_state = prob_sum[hist]
         yield (state, p_state/T)
@@ -164,18 +155,23 @@ class BestResponsePolicy(openspiel_policy.Policy):
         itertools.product(
             *actions_per_player), itertools.product(*probs_per_player))]
     
+  def avg_policy_prob(self, state):
+    policy_history = self._policy_history
+    num_policies = len(policy_history)
+    cumul = {action : 0.0 for action in policy_history[0].action_probabilities(state)}
+    for policy in policy_history:
+      for action, prob in policy.action_probabilities(state).items():
+        cumul[action] += prob
+    return {action : cumul[action]/num_policies for action in cumul}.items()
+
   def transitions(self, state):
     """Returns a list of (action, cf_prob) pairs from the specified state."""
-    T = len(self._policy_history)
     if state.current_player() == self._player_id:
-      return [[(action, 1.0) for action in state.legal_actions()] for t in range(T)]
+      return [(action, 1.0) for action in state.legal_actions()]
     elif state.is_chance_node():
-      return [state.chance_outcomes() for t in range(T)]
-    elif state.is_simultaneous_node():
-      return [self.joint_action_probabilities_counterfactual(state) for t in range(T)]
+      return state.chance_outcomes()
     else:
-        # return list(self._policy.action_probabilities(state).items())
-        return [list(policy.action_probabilities(state).items()) for policy in self._policy_history]
+        return list(self.avg_policy_prob(state))
 
   @_memoize_method(key_fn=lambda state: state.history_str())
   def value(self, state):
@@ -188,10 +184,9 @@ class BestResponsePolicy(openspiel_policy.Policy):
           state.information_state_string(self._player_id))
       return self.q_value(state, action)
     else:
-      T = len(self._policy_history)
-      return sum(sum(p * self.q_value(state, a)
-                 for a, p in self.transitions(state)[t]
-                 if p > self._cut_threshold) for t in range(T))/T
+      return sum(p * self.q_value(state, a)
+                 for a, p in self.transitions(state)
+                 if p > self._cut_threshold)
 
   def q_value(self, state, action):
     """Returns the value of the (state, action) to the best-responder."""
@@ -241,163 +236,3 @@ class BestResponsePolicy(openspiel_policy.Policy):
     return {
         self.best_response_action(state.information_state_string(player_id)): 1
     }
-
-
-class CPPBestResponsePolicy(openspiel_policy.Policy):
-  """Computes best response action_probabilities using open_spiel's C++ backend.
-
-     May have better performance than best_response.py for large games.
-  """
-
-  def __init__(self,
-               game,
-               best_responder_id,
-               policy,
-               all_states=None,
-               state_to_information_state=None,
-               best_response_processor=None,
-               cut_threshold=0.0):
-    """Constructor.
-
-    Args:
-      game: The game to analyze.
-      best_responder_id: The player id of the best-responder.
-      policy: A policy.Policy object representing the joint policy, taking a
-        state and returning a list of (action, probability) pairs. This could be
-        aggr_policy, for instance.
-      all_states: The result of calling get_all_states.get_all_states. Cached
-        for improved performance.
-      state_to_information_state: A dict mapping state.history_str to
-        state.information_state for every state in the game. Cached for improved
-        performance.
-      best_response_processor: A TabularBestResponse object, used for processing
-        the best response actions.
-      cut_threshold: The probability to cut when calculating the value.
-        Increasing this value will trade off accuracy for speed.
-    """
-    (self.all_states, self.state_to_information_state) = (
-        compute_states_and_info_states_if_none(game, all_states,
-                                               state_to_information_state))
-
-    policy_to_dict = policy_utils.policy_to_dict(
-        policy, game, self.all_states, self.state_to_information_state)
-
-    # pylint: disable=g-complex-comprehension
-    # Cache TabularBestResponse for players, due to their costly construction
-    # TODO(b/140426861): Use a single best-responder once the code supports
-    # multiple player ids.
-    if not best_response_processor:
-      best_response_processor = pyspiel.TabularBestResponse(
-          game, best_responder_id, policy_to_dict)
-
-    self._policy = policy
-    self.game = game
-    self.best_responder_id = best_responder_id
-    self.tabular_best_response_map = (
-        best_response_processor.get_best_response_actions())
-
-    self._cut_threshold = cut_threshold
-
-  def decision_nodes(self, parent_state):
-    """Yields a (state, cf_prob) pair for each descendant decision node."""
-    # pdb.set_trace()
-    if not parent_state.is_terminal():
-      if parent_state.current_player() == self.best_responder_id:
-        yield (parent_state, 1.0)
-      for action, p_action in self.transitions(parent_state):
-        for state, p_state in self.decision_nodes(parent_state.child(action)):
-          yield (state, p_state * p_action)
-
-  def avg_policy_prob(self, state):
-    policy_history = self._policy_history
-    num_policies = len(policy_history)
-    cumul = {action : 0.0 for action in policy_history[0].action_probabilities(state)}
-    for policy in policy_history:
-      for action, prob in policy.action_probabilities(state).items():
-        cumul[action] += prob
-    return {action : cumul[action]/num_policies for action in cumul}.items()
-
-  def transitions(self, state):
-    """Returns a list of (action, cf_prob) pairs from the specified state."""
-    # pdb.set_trace()
-    if state.current_player() == self.best_responder_id:
-      # Counterfactual reach probabilities exclude the best-responder's actions,
-      # hence return probability 1.0 for every action.
-      return [(action, 1.0) for action in state.legal_actions()]
-    elif state.is_chance_node():
-      return state.chance_outcomes()
-    else:
-    #   return list(self._policy.action_probabilities(state).items())
-        return list(self.avg_policy_prob(state))
-
-  @_memoize_method(key_fn=lambda state: state.history_str())
-  def value(self, state):
-    """Returns the value of the specified state to the best-responder."""
-    # pdb.set_trace()
-    if state.is_terminal():
-      return state.player_return(self.best_responder_id)
-    elif state.current_player() == self.best_responder_id:
-      action = self.best_response_action(
-          state.information_state_string(self.best_responder_id))
-      return self.q_value(state, action)
-    else:
-      return sum(p * self.q_value(state, a)
-                 for a, p in self.transitions(state)
-                 if p > self._cut_threshold)
-
-  def q_value(self, state, action):
-    """Returns the value of the (state, action) to the best-responder."""
-    # pdb.set_trace()
-    return self.value(state.child(action))
-
-  @_memoize_method()
-  def best_response_action(self, infostate):
-    """Returns the best response for this information state."""
-    # pdb.set_trace()
-    action = self.tabular_best_response_map[infostate]
-    return action
-
-  def action_probabilities(self, state, player_id=None):
-    """Returns the policy for a player in a state.
-
-    Args:
-      state: A `pyspiel.State` object.
-      player_id: Optional, the player id for whom we want an action. Optional
-        unless this is a simultabeous state at which multiple players can act.
-
-    Returns:
-      A `dict` of `{action: probability}` for the specified player in the
-      supplied state.
-    """
-    # Send the best-response probabilities for the best-responder
-    # pdb.set_trace()
-    if state.current_player() == self.best_responder_id:
-      probs = {action_id: 0. for action_id in state.legal_actions()}
-      info_state = self.state_to_information_state[state.history_str()]
-      probs[self.tabular_best_response_map[info_state]] = 1.
-      return probs
-
-    # Send the default probabilities for all other players
-    return self._policy.action_probabilities(state, player_id)
-
-  @property
-  def policy(self):
-    return self._policy
-
-  def copy_with_noise(self, alpha=0.0, beta=0.0):
-    """Copies this policy and adds noise, making it a Noisy Best Response.
-
-    The policy's new probabilities P' on each state s become
-    P'(s) = alpha * epsilon + (1-alpha) * P(s)
-
-    With P the former policy's probabilities, and epsilon ~ Softmax(beta *
-    Uniform)
-
-    Args:
-      alpha: First mixture component
-      beta: Softmax 1/temperature component
-
-    Returns:
-      Noisy copy of best response.
-    """
-    return noisy_policy.NoisyPolicy(self, alpha, beta, self.all_states)
