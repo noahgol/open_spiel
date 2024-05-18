@@ -121,6 +121,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
         self._history_infosets.append(self.info_sets(root_state, self._policy_history[t]))
 
     self._cut_threshold = cut_threshold
+    self._use_weighted_average = False
 
   def info_sets(self, state, policy=None):
     """Returns a dict of infostatekey to list of (state, cf_probability)."""
@@ -219,12 +220,15 @@ class BestResponsePolicy(openspiel_policy.Policy):
         value_sum = 0
         for t in range(len(self._policy_history)):
           infoset = self._history_infosets[t].get(infostate_str)
-          reaching_prob = sum(cf_p for s, cf_p in infoset) if infoset else 1
           value = sum(p * self.q_value(state, a) for a, p in self.transitions(state, self._policy_history[t]))
-          value_sum += reaching_prob * value
-          prob_sum += reaching_prob
+          if self._use_weighted_average:
+            reaching_prob = sum(cf_p for s, cf_p in infoset) if infoset else 1
+            value_sum += reaching_prob * value
+            prob_sum += reaching_prob
+          else:
+            value_sum += value
         # return weighted value
-        return value_sum / prob_sum
+        return value_sum / (prob_sum if self._use_weighted_average else len(self._policy_history))
 
   def q_value(self, state, action):
     """Returns the value of the (state, action) to the best-responder."""
@@ -253,9 +257,12 @@ class BestResponsePolicy(openspiel_policy.Policy):
       def best_response_action_aux(a):
         values = [sum(cf_p * self.q_value(s, a) for s, cf_p in infoset)
                                                 for infoset in infoset_history]
-        reaching_probs = [sum(cf_p for s, cf_p in infoset)
-                                   for infoset in infoset_history]
-        return sum(v * p for v, p in zip(values, reaching_probs))/sum(reaching_probs)
+        if self._use_weighted_average:
+          reaching_probs = [sum(cf_p for s, cf_p in infoset)
+                                     for infoset in infoset_history]
+          return sum(v * p for v, p in zip(values, reaching_probs))/sum(reaching_probs)
+        else:
+          return sum(values) / len(self._history_infosets)
       # Returns the best action of the weighted state-value over policy history.
       return max(legal_actions, key=best_response_action_aux)
     else:
