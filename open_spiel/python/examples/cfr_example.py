@@ -32,9 +32,9 @@ flags.DEFINE_integer("print_freq", 10, "How often to print the exploitability")
 
 def main(_):
 #  game = pyspiel.load_game("pig", {"players": FLAGS.players, "horizon" : FLAGS.horizon})
-#  game = pyspiel.load_game("kuhn_poker", {"players": FLAGS.players})
-  game = pyspiel.load_game_as_turn_based("goofspiel", 
-      {"players": 3, "imp_info": True, "num_cards": 4, "points_order": "descending"})
+  game = pyspiel.load_game("kuhn_poker", {"players": FLAGS.players})
+#  game = pyspiel.load_game_as_turn_based("goofspiel", 
+#      {"players": 3, "imp_info": True, "num_cards": 4, "points_order": "descending"})
   
   cfr_solver = cfr.CFRSolver(game)
 
