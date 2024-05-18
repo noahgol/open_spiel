@@ -123,16 +123,27 @@ class BestResponsePolicy(openspiel_policy.Policy):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
 
-  def decision_nodes(self, parent_state):
+  def decision_nodes(self, parent_state, policy=None):
     """Yields a (state, cf_prob) pair for each descendant decision node."""
     if not parent_state.is_terminal():
       if (parent_state.current_player() == self._player_id or
           parent_state.is_simultaneous_node()):
         yield (parent_state, 1.0)
-      for action, p_action in self.transitions(parent_state):
-        for state, p_state in self.decision_nodes(
-            openspiel_policy.child(parent_state, action)):
-          yield (state, p_state * p_action)
+      if self._policy_history is None or policy:
+        # original path or calculate for speficic policy in policy_history
+        for action, p_action in self.transitions(parent_state, policy): 
+          for state, p_state in self.decision_nodes(
+              openspiel_policy.child(parent_state, action), policy):
+            yield (state, p_state * p_action)
+      else:
+        counter = collections.Counter({})
+        for policy in self._policy_history:
+          for state, p_state in self.decision_nodes(parent_state, policy):
+            counter[state] += p_state
+        T = len(self._policy_history)
+        for state, p_state in counter.items():
+          yield (state, p_state/T)
+
         # compute sum_{t} p_state(t-th policy) * p_action(t-th policy)
         # for action in num_actions:
         #    sum = 0
@@ -143,7 +154,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
         #           sum += p_state * p_action
         #     return sum
 
-  def joint_action_probabilities_counterfactual(self, state):
+  def joint_action_probabilities_counterfactual(self, state, policy=None):
     """Get list of action, probability tuples for simultaneous node.
 
     Counterfactual reach probabilities exclude the best-responder's actions,
@@ -157,7 +168,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
         actions for each player of the game.
     """
     actions_per_player, probs_per_player = (
-        openspiel_policy.joint_action_probabilities_aux(state, self._policy))
+        openspiel_policy.joint_action_probabilities_aux(state, policy if policy else self._policy))
     probs_per_player[self._player_id] = [
         1.0 for _ in probs_per_player[self._player_id]
     ]
@@ -165,7 +176,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
         itertools.product(
             *actions_per_player), itertools.product(*probs_per_player))]
 
-  def transitions(self, state):
+  def transitions(self, state, policy=None):
     """Returns a list of (action, cf_prob) pairs from the specified state."""
     if state.current_player() == self._player_id:
       # Counterfactual reach probabilities exclude the best-responder's actions,
@@ -174,11 +185,25 @@ class BestResponsePolicy(openspiel_policy.Policy):
     elif state.is_chance_node():
       return state.chance_outcomes()
     elif state.is_simultaneous_node():
-      return self.joint_action_probabilities_counterfactual(state)
+      return self.joint_action_probabilities_counterfactual(state, policy)
     else:
       # average over policy history
       # return list(policy.action_probabilities(state).items() for policy in self._policy_history)
-      return list(self._policy.action_probabilities(state).items())
+
+      if policy is None and self._policy_history is None:
+        # the original path
+        return list(self._policy.action_probabilities(state).items())
+      elif policy:
+        # calculate transition for particular t in T
+        return list(policy.action_probabilities(state).items())
+      else:
+        # calculate average (action, cf_prob) pairs over policy history T
+        counter = collections.Counter({})
+        for policy in self._policy_history:
+          counter += policy.action_probabilities(state)
+        T = len(self._policy_history)
+        return [(action, prob/T) for action, prob in counter.items()]
+  
 
   @_memoize_method(key_fn=lambda state: state.history_str())
   def value(self, state):
