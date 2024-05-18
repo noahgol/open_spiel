@@ -1,5 +1,5 @@
 # Runs CFR on a game and prints exploitability
-# Michael Han April 2024
+# Michael Han 2024
 
 import itertools as it
 from absl import app
@@ -13,6 +13,7 @@ games = ["kuhn_poker"]
 # games = ["turn_based_simultaneous_game(game=goofspiel(players=3,imp_info=True,num_cards=4,points_order=descending))"]
 # games = ["leduc_poker"]
 # games = ["pig(horizon=5)"]
+# games = ["hearts(pass_cards=false))"]
 
 def print_policy(policy):
   for state, probs in zip(it.chain(*policy.states_per_player),
@@ -25,15 +26,17 @@ def main(_):
         game = pyspiel.load_game(game_name)
         cfr_solver = cfr.CFRSolver(game)
 
-        T = 10
+        T = 500
         for i in range(T):
             cfr_solver.evaluate_and_update_policy()
-            if i % 1 == 0:
-                conv1 = exploitability.nash_conv(game, cfr_solver.average_policy())
-                conv2 = exploitability.new_nash_conv(game, cfr_solver.policy_history(), cfr_solver.average_policy())
-                print(f'Old exploitability after step {i} is {conv1}') 
+            if i % 10 == 0:
+                # conv1 = exploitability.nash_conv(game, cfr_solver.average_policy())
+                # print(f'Old exploitability after step {i} is {conv1}')
+                conv2 = exploitability.new_nash_conv(game, cfr_solver.policy_history(), cfr_solver.average_policy(), None)
                 print(f'New exploitability after step {i} is {conv2}')
-                
+                conv3 = exploitability.new_nash_conv(game, cfr_solver.policy_history(), cfr_solver.average_policy(), cfr_solver.policy_cache())
+                print(f'Optimized exploitability after step {i} is {conv3}')
+
         # average_pol = cfr_solver.average_policy()
         # print_policy(average_pol)
 

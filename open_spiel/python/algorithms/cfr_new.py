@@ -44,6 +44,22 @@ class _InfoStateNode(object):
   # during the policy iterations
   cumulative_policy = attr.ib(factory=lambda: collections.defaultdict(float))
 
+@attr.s
+class _GroundStateNode(object):
+  """An object wrapping values associated to a ground state."""
+  # The list of the legal actions.
+  legal_actions = attr.ib()
+  # Map from information states string representations and actions to the
+  # counterfactual regrets, accumulated over the policy iterations
+  # cumulative_regret = attr.ib(factory=lambda: collections.defaultdict(float))
+  # Same as above for the cumulative of the policy probabilities computed
+  # during the policy iterations
+  # cumulative_policy = attr.ib(factory=lambda: collections.defaultdict(float))
+
+  cumulative_p_state = attr.ib(float)
+  cumulative_p_action = attr.ib(factory=lambda: collections.defaultdict(float))
+  transition_T = attr.ib(int)
+
 
 def _apply_regret_matching_plus_reset(info_state_nodes):
   """Resets negative cumulative regrets to 0.
@@ -190,13 +206,16 @@ class _CFRSolverBase(object):
     self._average_policy = self._current_policy.__copy__()
 
     self._info_state_nodes = {}
+    self._ground_state_nodes = {}
+    self._initialize_ground_state_nodes(self._root_node)
     self._initialize_info_state_nodes(self._root_node)
 
     self._iteration = 0  # For possible linear-averaging.
     self._linear_averaging = linear_averaging
     self._alternating_updates = alternating_updates
     self._regret_matching_plus = regret_matching_plus
-    self._policy_history = []  # Initialize an empty list to store policy histories.
+    self._policy_history = []
+    self._policy_cache = [0, self._ground_state_nodes, [0 for _ in range(self._num_players)]]
 
   def _initialize_info_state_nodes(self, state):
     """Initializes info_state_nodes.
@@ -229,7 +248,34 @@ class _CFRSolverBase(object):
 
     for action in info_state_node.legal_actions:
       self._initialize_info_state_nodes(state.child(action))
+  
+  def _initialize_ground_state_nodes(self, state):
+    if state.is_terminal():
+      return
 
+    current_player = state.current_player()
+    ground_state = state.history_str()
+
+    ground_state_node = self._ground_state_nodes.get(ground_state)
+    if ground_state_node is None:
+      legal_actions = state.legal_actions(current_player)
+      ground_state_node = _GroundStateNode(
+          legal_actions=legal_actions,
+          cumulative_p_state=0,
+          transition_T=0)
+      self._ground_state_nodes[ground_state] = ground_state_node
+
+    if state.is_chance_node():
+      for action, unused_action_prob in state.chance_outcomes():
+        self._initialize_ground_state_nodes(state.child(action))
+      return
+
+    for action in ground_state_node.legal_actions:
+      self._initialize_ground_state_nodes(state.child(action))
+  
+  def policy_cache(self):
+    return self._policy_cache
+  
   def current_policy(self):
     """Returns the current policy as a TabularPolicy.
 

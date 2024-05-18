@@ -57,6 +57,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
                game,
                player_id,
                policy_history,
+               policy_cache,
                root_state=None,
                cut_threshold=0.0):
     """Initializes the best-response calculation.
@@ -73,11 +74,15 @@ class BestResponsePolicy(openspiel_policy.Policy):
     self._num_players = game.num_players()
     self._player_id = player_id
     self._policy_history = policy_history
+    self._policy_cache = policy_cache
     if root_state is None:
       root_state = game.new_initial_state()
     self._root_state = root_state
     self.infosets = self.info_sets(root_state)
     self._cut_threshold = cut_threshold
+    if policy_cache:
+      policy_cache[2][self._player_id] = len(policy_history)
+
 
   def info_sets(self, state):
     """Returns a dict of infostatekey to list of (state, cf_probability)."""
@@ -110,8 +115,17 @@ class BestResponsePolicy(openspiel_policy.Policy):
             openspiel_policy.child(parent_state, action), policy):
           yield (state, p_state * p_action)
 
+  def all_descendant_states(self, parent_state):
+    if not parent_state.is_terminal():
+      if (parent_state.current_player() == self._player_id or
+          parent_state.is_simultaneous_node()):
+        yield parent_state
+      for action in parent_state.legal_actions():
+        for child_state in self.all_descendant_states(parent_state.child(action)):
+          yield child_state
+
   @_memoize_method(key_fn=lambda state: state.history_str())
-  def decision_nodes(self, parent_state):
+  def decision_nodes_slow(self, parent_state):
     # for each t in [T], call old decision_nodes() with policy_history[t]
     # average reach probabilities for each state over t in [T].
     # return list of (state, average_reach_prob) pairs
@@ -132,6 +146,43 @@ class BestResponsePolicy(openspiel_policy.Policy):
       for hist in prob_sum:
         state, p_state = prob_sum[hist]
         yield (state, p_state/T)
+
+  @_memoize_method(key_fn=lambda state: state.history_str())
+  def decision_nodes(self, parent_state):
+    # for each t in [T], call old decision_nodes() with policy_history[t]
+    # average reach probabilities for each state over t in [T].
+    # return list of (state, average_reach_prob) pairs
+
+    if not parent_state.is_terminal():
+      if (parent_state.current_player() == self._player_id or
+          parent_state.is_simultaneous_node()):
+        yield (parent_state, 1.0)
+      T = len(self._policy_history)
+      cache_T = 0
+      cache = self._policy_cache
+      if cache:
+        cache_T = cache[2][self._player_id]
+      prob_sum = {}
+      for policy in self._policy_history[cache_T:]: # only loop through policies after cache_T
+        for state, p_state in self.decision_nodes_per_policy(parent_state, policy):
+          hist = state.history_str()
+          if cache:
+            ground_state_node = cache[1][hist]
+            ground_state_node.cumulative_p_state += p_state
+          else:
+            if hist not in prob_sum:
+              prob_sum[hist] = [state, p_state]
+            else:
+              prob_sum[hist][1] += p_state
+      if cache:
+        for state in self.all_descendant_states(parent_state):
+          hist = state.history_str()
+          ground_state_node = cache[1][hist]
+          yield (state, ground_state_node.cumulative_p_state/T)
+      else:
+        for hist in prob_sum:
+          state, p_state = prob_sum[hist]
+          yield (state, p_state/T)
 
   def joint_action_probabilities_counterfactual(self, state):
     """Get list of action, probability tuples for simultaneous node.
@@ -155,7 +206,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
         itertools.product(
             *actions_per_player), itertools.product(*probs_per_player))]
     
-  def avg_policy_prob(self, state):
+  def avg_action_probs_old(self, state):
     policy_history = self._policy_history
     num_policies = len(policy_history)
     cumul = {action : 0.0 for action in policy_history[0].action_probabilities(state)}
@@ -164,6 +215,28 @@ class BestResponsePolicy(openspiel_policy.Policy):
         cumul[action] += prob
     return {action : cumul[action]/num_policies for action in cumul}.items()
 
+  def avg_action_probs(self, state):
+    cache = self._policy_cache
+    cache_T = 0
+    if cache:
+      hist = state.history_str()
+      ground_state_node = cache[1][hist]
+      cache_T = ground_state_node.transition_T
+    else:
+      cumul = {action : 0.0 for action in self._policy_history[0].action_probabilities(state)}
+    T = len(self._policy_history)
+    for policy in self._policy_history[cache_T:]:
+      for action, prob in policy.action_probabilities(state).items():
+        if cache:
+          ground_state_node.cumulative_p_action[action] += prob
+        else:
+          cumul[action] += prob
+    if cache:
+      ground_state_node.transition_T = T
+      return {action : ground_state_node.cumulative_p_action[action]/T for action in state.legal_actions()}.items()
+    else:
+      return {action : cumul[action]/T for action in cumul}.items()
+
   def transitions(self, state):
     """Returns a list of (action, cf_prob) pairs from the specified state."""
     if state.current_player() == self._player_id:
@@ -171,7 +244,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
     elif state.is_chance_node():
       return state.chance_outcomes()
     else:
-        return list(self.avg_policy_prob(state))
+        return list(self.avg_action_probs(state))
 
   @_memoize_method(key_fn=lambda state: state.history_str())
   def value(self, state):
