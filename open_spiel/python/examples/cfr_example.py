@@ -31,14 +31,20 @@ flags.DEFINE_integer("print_freq", 1, "How often to print the exploitability")
 
 
 def main(_):
-  game = pyspiel.load_game(FLAGS.game, {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+#  game = pyspiel.load_game("pig", {"players": FLAGS.players, "horizon" : FLAGS.horizon})
+  game = pyspiel.load_game("kuhn_poker", {"players": FLAGS.players})
+#  game = pyspiel.load_game_as_turn_based("goofspiel", 
+#      {"players": 3, "imp_info": True, "num_cards": 4, "points_order": "descending"})
+  
   cfr_solver = cfr.CFRSolver(game)
 
   for i in range(FLAGS.iterations):
     cfr_solver.evaluate_and_update_policy()
-    if i % FLAGS.print_freq == 0:
-      conv = exploitability.exploitability(game, cfr_solver.average_policy())
-      print("Iteration {} exploitability {}".format(i, conv))
+    if (i+1) % FLAGS.print_freq == 0:
+      conv = exploitability.nash_conv(game, cfr_solver.average_policy())
+      nash_conv = exploitability.nash_conv(game, cfr_solver.average_policy(),
+                                           policy_history=cfr_solver.policy_history())
+      print("Iteration {0:4d} exploitability {1:.15f} new nash_conv {2:.15f}".format(i+1, conv, nash_conv))
 
 
 if __name__ == "__main__":

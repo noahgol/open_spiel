@@ -91,6 +91,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
                game,
                player_id,
                policy,
+               policy_history=None,
                root_state=None,
                cut_threshold=0.0):
     """Initializes the best-response calculation.
@@ -107,6 +108,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
     self._num_players = game.num_players()
     self._player_id = player_id
     self._policy = policy
+    self._policy_history = policy_history
     if root_state is None:
       root_state = game.new_initial_state()
     self._root_state = root_state
