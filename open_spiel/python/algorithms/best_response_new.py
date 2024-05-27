@@ -78,16 +78,16 @@ class BestResponsePolicy(openspiel_policy.Policy):
     if root_state is None:
       root_state = game.new_initial_state()
     self._root_state = root_state
-    self.infosets = self.info_sets(root_state)
+    self.infosets = [self.info_sets(root_state, policy) for policy in policy_history]
     self._cut_threshold = cut_threshold
     if policy_cache:
       policy_cache[2][self._player_id] = len(policy_history)
 
 
-  def info_sets(self, state):
+  def info_sets(self, state, policy):
     """Returns a dict of infostatekey to list of (state, cf_probability)."""
     infosets = collections.defaultdict(list)
-    for s, p in self.decision_nodes(state):
+    for s, p in self.decision_nodes_per_policy(state, policy):
       infosets[s.information_state_string(self._player_id)].append((s, p))
     return dict(infosets)
 
@@ -163,7 +163,7 @@ class BestResponsePolicy(openspiel_policy.Policy):
       if cache:
         cache_T = cache[2][self._player_id]
       prob_sum = {}
-      for policy in self._policy_history[cache_T:]: # only loop through policies after cache_T
+      for policy in self._policy_history[cache_T:]:
         for state, p_state in self.decision_nodes_per_policy(parent_state, policy):
           hist = state.history_str()
           if cache:
@@ -246,8 +246,11 @@ class BestResponsePolicy(openspiel_policy.Policy):
     else:
         return list(self.avg_action_probs(state))
 
-  @_memoize_method(key_fn=lambda state: state.history_str())
-  def value(self, state):
+  def value_root(self, state):
+    return sum(self.value(state, self._policy_history[i]) for i in range(len(self._policy_history)))/len(self._policy_history)
+      
+  # @_memoize_method(key_fn=lambda state: state.history_str())
+  def value(self, state, policy):
     """Returns the value of the specified state to the best-responder."""
     if state.is_terminal():
       return state.player_return(self._player_id)
@@ -255,13 +258,13 @@ class BestResponsePolicy(openspiel_policy.Policy):
           state.is_simultaneous_node()):
       action = self.best_response_action(
           state.information_state_string(self._player_id))
-      return self.q_value(state, action)
+      return self.q_value(state, action, policy)
     else:
-      return sum(p * self.q_value(state, a)
-                 for a, p in self.transitions(state)
+      return sum(p * self.q_value(state, a, policy)
+                 for a, p in self.transitions_per_policy(state, policy)
                  if p > self._cut_threshold)
 
-  def q_value(self, state, action):
+  def q_value(self, state, action, policy):
     """Returns the value of the (state, action) to the best-responder."""
     if state.is_simultaneous_node():
 
@@ -277,17 +280,22 @@ class BestResponsePolicy(openspiel_policy.Policy):
                  for a, p in zip(actions, probabilities / sum(probabilities))
                  if p > self._cut_threshold)
     else:
-      return self.value(state.child(action))
+      return self.value(state.child(action), policy)
 
   @_memoize_method()
   def best_response_action(self, infostate):
     """Returns the best response for this information state."""
-    infoset = self.infosets[infostate]
+    infoset = [self.infosets[i][infostate] for i in range(len(self._policy_history))]
     # Get actions from the first (state, cf_prob) pair in the infoset list.
     # Return the best action by counterfactual-reach-weighted state-value.
+    def result(a):
+      count = 0
+      for i in range(len(self._policy_history)):
+        count += sum(cf_p * self.q_value(s, a, self._policy_history[i]) for s, cf_p in infoset[i])
+      return count
     return max(
-        infoset[0][0].legal_actions(self._player_id),
-        key=lambda a: sum(cf_p * self.q_value(s, a) for s, cf_p in infoset))
+        infoset[0][0][0].legal_actions(self._player_id),
+        key=result)
 
   def action_probabilities(self, state, player_id=None):
     """Returns the policy for a player in a state.
